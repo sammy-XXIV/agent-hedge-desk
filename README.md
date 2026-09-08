@@ -132,6 +132,27 @@ Client agent A                                     Desk agent B
 
 Two payments, opposite directions, no human in the loop.
 
+## Try it
+
+The desk is live. No install, no wallet needed to see it price and challenge:
+
+```bash
+URL=https://agent-hedge-desk-production.up.railway.app
+
+curl $URL/health
+# desk address, hedge mode, and live collateral: balance / reserved / free
+
+curl -X POST $URL/quote -H 'content-type: application/json'   -d '{"pair":"BNBUSDT","strikePct":0.09,"expirySeconds":300,"notionalUsd":7.5,
+       "payoutAddress":"0xYourAddress"}'
+# a real put priced off live Binance realized volatility
+
+curl -X POST $URL/buy/<quoteId> -H 'content-type: application/json' -d '{}'
+# HTTP 402 - the x402 challenge, with the exact atomic premium and payTo
+```
+
+To actually buy one you need a Base Sepolia wallet with test USDC
+(<https://faucet.circle.com>) and any x402 client. `src/client.js` is one.
+
 ## API
 
 | Route | Paid | Does |
