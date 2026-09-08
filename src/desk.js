@@ -45,7 +45,7 @@ const QUOTE_TTL_MS = 60_000; // single-use plans expire in 60s; re-quote to proc
 
 const DESK_PK = process.env.DESK_PRIVATE_KEY;
 if (!DESK_PK) {
-  console.error("DESK_PRIVATE_KEY missing. Copy .env.example -> .env and set it.");
+  console.error("DESK_PRIVATE_KEY missing - set it in .env");
   process.exit(1);
 }
 const account = privateKeyToAccount(DESK_PK);

@@ -23,7 +23,7 @@ const MAX_PREMIUM_PCT = Number(process.env.MAX_PREMIUM_PCT || 6);
 
 const PK = process.env.CLIENT_PRIVATE_KEY;
 if (!PK) {
-  console.error("CLIENT_PRIVATE_KEY missing. Copy .env.example -> .env and set it.");
+  console.error("CLIENT_PRIVATE_KEY missing - set it in .env");
   process.exit(1);
 }
 try {

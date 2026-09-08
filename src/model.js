@@ -17,7 +17,7 @@ export const modelName = MODEL;
 export function assertModelConfigured() {
   if (!API_KEY) {
     throw new Error(
-      "No model API key. Set LLM_API_KEY (and LLM_PROVIDER / LLM_BASE_URL / LLM_MODEL) in .env - " +
+      "No model API key. Set LLM_API_KEY (with LLM_PROVIDER, LLM_BASE_URL, LLM_MODEL) in .env - " +
         "the client agent's buy/decline is a model judgment, not a threshold."
     );
   }
