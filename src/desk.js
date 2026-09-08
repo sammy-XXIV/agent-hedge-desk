@@ -30,7 +30,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { spotPrice, markPrice, normalizePair } from "./binance.js";
 import { quotePut, payoutUsd } from "./pricing.js";
-import { openHedge, closeHedge } from "./hedge.js";
+import { openHedge, closeHedge, hedgeFeasibility } from "./hedge.js";
 import { signRecord } from "./settle.js";
 
 const PORT = Number(process.env.PORT || process.env.DESK_PORT || 4040);
@@ -153,6 +153,20 @@ app.post("/quote", async (req, res) => {
     }
 
     const spot = await spotPrice(pair);
+
+    // Refuse cover the desk has no way to hedge. In simulated mode the hedge is
+    // notional anyway, so this only gates the modes that place a real order.
+    if (HEDGE_MODE !== "simulated") {
+      const feas = hedgeFeasibility({ notionalUsd, price: spot });
+      if (!feas.ok) {
+        return res.status(409).json({
+          error: "position too small to hedge",
+          detail: feas.problems.join("; "),
+          minNotionalUsd: feas.minNotionalUsd,
+        });
+      }
+    }
+
     const quote = await quotePut({
       pair,
       spot,

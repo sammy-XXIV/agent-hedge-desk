@@ -19,6 +19,25 @@ const MIN_NOTIONAL_USD = Number(process.env.HEDGE_MIN_NOTIONAL || 5);
 
 const stepDecimals = (String(QTY_STEP).split(".")[1] || "").length;
 
+// Can this notional actually be hedged on Binance at this price? Rounding down to
+// the LOT_SIZE step means small notionals collapse to zero - the desk must not
+// write cover it has no way to offset.
+export function hedgeFeasibility({ notionalUsd, price }) {
+  const stepped = Math.floor(notionalUsd / price / QTY_STEP) * QTY_STEP;
+  const qty = Number(stepped.toFixed(stepDecimals));
+  const notional = qty * price;
+  const problems = [];
+  if (qty < MIN_QTY) problems.push(`hedge qty ${qty} is below Binance minQty ${MIN_QTY}`);
+  if (notional < MIN_NOTIONAL_USD) problems.push(`hedge notional $${notional.toFixed(2)} is below the $${MIN_NOTIONAL_USD} minimum`);
+  return {
+    ok: problems.length === 0,
+    qty,
+    notionalUsd: Number(notional.toFixed(2)),
+    problems,
+    minNotionalUsd: Number(Math.max(MIN_QTY * price, MIN_NOTIONAL_USD).toFixed(2)),
+  };
+}
+
 export function openHedge({ pair, notionalUsd, entryPrice, mode }) {
   // Round DOWN to the step so the hedge never exceeds the intended notional.
   const stepped = Math.floor(notionalUsd / entryPrice / QTY_STEP) * QTY_STEP;
