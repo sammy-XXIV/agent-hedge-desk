@@ -5,3 +5,4 @@ node_modules/
 
 # local demo/recording notes - not part of the deliverable
 demo/
+.env.example
