@@ -16,7 +16,7 @@ import "dotenv/config";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import { paymentMiddleware } from "x402-express";
-import { getDefaultAsset } from "x402/shared";
+import { getDefaultAsset, decodeXPaymentResponse } from "x402/shared";
 import {
   createWalletClient,
   createPublicClient,
@@ -260,8 +260,28 @@ async function onPaid(q, res) {
   contracts.set(contractId, c);
 
   res.on("finish", () => {
-    const settlementLanded = Boolean(res.getHeader("X-PAYMENT-RESPONSE"));
+    // x402 sets X-PAYMENT-RESPONSE from whatever settle() returned, including a
+    // FAILED settlement - it only catches thrown errors. Presence of the header is
+    // therefore not proof of payment; decode it and require success, or the desk
+    // writes cover it was never paid for.
+    let settlementLanded = false;
+    let settleTx = null;
+    const header = res.getHeader("X-PAYMENT-RESPONSE");
+    if (header) {
+      try {
+        const decoded = decodeXPaymentResponse(String(header));
+        settlementLanded = decoded?.success === true;
+        settleTx = decoded?.transaction || null;
+        if (!settlementLanded) {
+          console.warn(`[desk] settlement reported FAILURE: ${JSON.stringify(decoded).slice(0, 200)}`);
+        }
+      } catch (e) {
+        console.warn(`[desk] could not decode settlement header: ${e.message}`);
+      }
+    }
     if (res.statusCode < 400 && settlementLanded) {
+      const c0 = contracts.get(contractId);
+      if (c0) c0.premiumTx = settleTx;
       activate(contractId).catch((e) => {
         console.error("[desk] activate error:", e.message);
         voidContract(contractId, `activation failed: ${e.message}`);
@@ -352,6 +372,7 @@ async function settle(id) {
     qty: c.terms.qty,
     maxPayoutUsd: c.terms.maxPayoutUsd,
     premiumUsd: c.premiumPaidUsd,
+    premiumTx: c.premiumTx || null,
     markPriceAtExpiry: mark,
     markSource,
     payoutUsd: payout,
@@ -389,6 +410,7 @@ app.get("/contract/:id", (req, res) => {
     // The hedge the desk must place against this contract. Surfaced so the buyer
     // (or anything driving the desk) can see it without reading desk logs.
     hedge: c.hedge?.instruction || null,
+    premiumTx: c.premiumTx || null,
     settlement: c.settlement || null,
   });
 });
