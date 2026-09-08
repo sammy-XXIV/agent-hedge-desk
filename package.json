@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Agent Hedging Desk - one agent sells another a synthetic put on a Binance asset. Premium paid agent-to-agent over x402; desk hedges via Binance Agent OS; on-chain payout at expiry. Binance Agent OS Mini Hackathon, Track A (Payment Workflows).",
   "scripts": {
+    "start": "node src/desk.js",
     "desk": "node src/desk.js",
     "client": "node src/client.js"
   },
