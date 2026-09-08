@@ -163,10 +163,42 @@ sigma is what moves it. At BNB's ~41% vol over a 90s expiry, `0.05` sits around
 though it costs a cent and offers a 200x payoff ratio. There is no dry-run flag:
 if it decides to buy, it pays for real.
 
-## Demo
+## What a run looks like
 
-See [`demo/SCRIPT.md`](demo/SCRIPT.md) — a 60-90s two-run script (one payout, one
-worthless) with the exact commands and what to show on screen.
+Two outcomes are worth trying, because the client agent genuinely decides between
+them rather than following a switch.
+
+**It buys** — strike ~0.7 sigma out, so the cover is plausible:
+
+```
+[client] 2) deliberating...
+     premium 0.020% of notional | max payout $2 = 101x premium
+     expected move over 300s: $0.94 | strike sits 0.72 sigma out
+[client]    BUY
+     "Premium 0.02% of notional, strike 0.72 sigma from spot, max payout $2 covers
+      plausible move. Payoff ratio 101x, vol high, recent -1.88% move."
+[client]    premium paid - x402 receipt: { success: true, transaction: '0x4384d71a...' }
+[client]    contract 659aa490 pending_settlement
+[client]    status -> active
+[client]    status -> settled
+[client] 5) SETTLED
+     mark @ expiry : 739.36  (spot-fallback)   strike 738.231
+     payout        : $0 [none]
+     USDC after    : 19.980246   (before 20)
+```
+
+**It declines** — same $0.01 premium and a 200x payoff ratio, but the strike is far
+enough out that the option cannot realistically pay:
+
+```
+[client]    DECLINE
+     "Strike 35.96 sigma out with only $0.51 expected move over 90s. Probability of
+      payout is effectively zero; payoff ratio 200x is meaningless against negative EV."
+[client] declined the cover. no payment made.
+```
+
+That second case is the point: it is offered something cheap with a huge headline
+payoff and turns it down for the right reason.
 
 ## Limitations (stated plainly)
 
@@ -188,13 +220,3 @@ worthless) with the exact commands and what to show on screen.
   the spot price. The signed record always states which was used (`markSource`:
   `futures-mark` or `spot-fallback`), so a settlement is never silently rebased.
 - The client's underlying spot bag is assumed, not verified on-chain.
-
-## Submission checklist
-
-- [ ] desk funded: >= $2 USDC **and** Base Sepolia ETH for payout gas
-- [ ] one full loop on camera: agent **buys** (`0.05`), premium settles via x402,
-      hedge opens, contract settles, payout tx shown
-- [ ] one **decline** on camera (`2.5`) with the model's stated reasoning
-- [ ] video (60-90s) + this repo public + survey completed, theme = Payment Workflows
-- [ ] follow @Binance, repost the announcement, quote-repost with the video + repo
-- [ ] in before **Sept 8, 2026, 23:59 UTC**
