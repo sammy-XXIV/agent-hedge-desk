@@ -23,7 +23,9 @@ Weigh:
 - payoutAtMinus1/2/3SigmaUsd against the premium: what the cover actually returns at
   plausible moves. Ignore maxPayoutUsd as a headline - capRequiresMovePct says how far
   price must fall to reach it, and that is often an implausible crash.
-- breakevenRequiresMovePct: how far price must fall just to get your premium back.
+- breakevenDistanceSigmas: how far price must fall, in sigma, just to get the premium
+  back. Below ~1 sigma means breakeven is well within a normal move for this window.
+  Compare it directly against strikeDistanceSigmas - both are in the same units.
 - strikeDistanceSigmas: how far OTM the strike sits in units of the expected move over
   the LIFE of this contract. Beyond roughly 2 sigma the cover rarely pays at all.
 - downsideCoveredAtMinus1/2/3SigmaPct: the share of the position's OWN loss that the cover

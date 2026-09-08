@@ -110,6 +110,9 @@ async function main() {
   };
   const breakevenMark = quote.strike - quote.premiumUsd / quote.qty;
   const breakevenMovePct = ((quote.spot - breakevenMark) / quote.spot) * 100;
+  // Express breakeven in sigma too. Models reliably reason about sigma but
+  // routinely misscale small percentages (0.112% read as 11.2%).
+  const breakevenDistanceSigmas = expectedMoveUsd > 0 ? (quote.spot - breakevenMark) / expectedMoveUsd : Infinity;
   const capMark = quote.strike - quote.maxPayoutUsd / quote.qty;
   const capRequiresMovePct = ((quote.spot - capMark) / quote.spot) * 100;
   const day = await dayStats(quote.pair);
@@ -118,7 +121,7 @@ async function main() {
   console.log(`     premium ${premiumPct.toFixed(3)}% of notional = ${(quote.premiumUsd / quote.fairPremiumUsd).toFixed(2)}x fair value`);
   console.log(`     payout at -1s $${payoutAt(1)} | -2s $${payoutAt(2)} | -3s $${payoutAt(3)}  (premium $${quote.premiumUsd})`);
   console.log(`     position loses $${positionLossAt(1)} at -1s -> cover returns ${coverageAt(1)}% of it | at -2s ${coverageAt(2)}%`);
-  console.log(`     breakeven needs -${breakevenMovePct.toFixed(3)}% | the $${quote.maxPayoutUsd} cap needs -${capRequiresMovePct.toFixed(1)}%`);
+  console.log(`     breakeven at ${breakevenDistanceSigmas.toFixed(2)} sigma down (-${breakevenMovePct.toFixed(3)}%) | the $${quote.maxPayoutUsd} cap needs -${capRequiresMovePct.toFixed(1)}%`);
   console.log(`     expected move over ${quote.expirySeconds}s: $${expectedMoveUsd.toFixed(2)} | strike sits ${strikeDistanceSigmas.toFixed(2)} sigma out`);
   console.log(`     vol ${(quote.sigmaAnnualized * 100).toFixed(1)}% annualized | 24h ${day.priceChangePct24h > 0 ? "+" : ""}${day.priceChangePct24h}%`);
 
@@ -140,7 +143,7 @@ async function main() {
       payoutAtMinus1SigmaUsd: payoutAt(1),
       payoutAtMinus2SigmaUsd: payoutAt(2),
       payoutAtMinus3SigmaUsd: payoutAt(3),
-      breakevenRequiresMovePct: Number(breakevenMovePct.toFixed(3)),
+      breakevenDistanceSigmas: Number(breakevenDistanceSigmas.toFixed(3)),
       capRequiresMovePct: Number(capRequiresMovePct.toFixed(2)),
       positionLossAtMinus1SigmaUsd: positionLossAt(1),
       positionLossAtMinus2SigmaUsd: positionLossAt(2),
