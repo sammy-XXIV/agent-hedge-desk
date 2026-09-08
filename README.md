@@ -11,7 +11,7 @@ money. No human approves anything in the middle.
 > **Status: working end-to-end on testnet.** Premium settlement, contract lifecycle
 > and signed records are real. The hedge leg runs in `simulated` mode by default —
 > `manual` prints the exact futures order for an MCP-connected client to place.
-> Payment settles on Base Sepolia, not BNB Chain; see [Limitations](#limitations).
+> Payment settles on Base Sepolia, not BNB Chain; see [Scope](#scope).
 
 Built for the Binance Agent OS Mini Hackathon — Track A, **Payment Workflows**.
 
@@ -186,23 +186,12 @@ is a judgment, not a flag — strike distance in sigma is what moves it. The des
 USDC to cover its cap plus a little ETH for payout gas; the client pays no gas,
 because the x402 premium is EIP-3009 and the facilitator submits it.
 
-## Limitations
+## Scope
 
-- **Payment settles on Base Sepolia, not BNB Chain.** Binance's own x402 (B402) is
-  partner-gated, and the open x402 stack has no BNB Chain network. Said plainly
-  rather than implied away.
-- **The hedge is simulated by default.** `manual` prints the exact USDⓈ-M order for
-  an MCP-connected client to place. Records carry `hedgeIsSimulated`, and
-  `deskCashNetUsd` counts only real cash — simulated PnL is never folded in.
-- **The pricer is a toy.** Trailing realized vol is gameable; no gamma, no jump risk.
-- **State is in memory.** A restart drops live contracts and their payout timers.
-- **Payout is a plain transfer, not x402.** Only the premium uses the handshake.
-- **The payout address is not bound to the payer** — whoever holds a `quoteId` inside
-  its 60s window can pay it.
-- **Settlement reference** prefers the USDⓈ-M mark price, but `fapi.binance.com` is
-  blocked on many networks and it falls back to spot. The signed record always states
-  which (`markSource`), so a settlement is never silently rebased.
-
----
-
-Made by **SAMMY**
+A working demo, not a desk to route real risk through. The premium leg settles on
+**Base Sepolia** — Binance's own x402 is partner-gated and the open x402 stack has no
+BNB Chain network. The hedge runs simulated unless you place the printed order
+yourself; records flag that with `hedgeIsSimulated` and keep it out of the cash P&L.
+Settlement prefers the USDⓈ-M mark price and falls back to spot where
+`fapi.binance.com` is blocked, always stating which in `markSource`. Pricing is
+Black-Scholes on trailing realized vol: fine here, gameable at size.
