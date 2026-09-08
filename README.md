@@ -172,20 +172,6 @@ atomic premium, the desk's `payTo`, and the USDC asset for the network.
 | `src/hedge.js` | the hedge leg — `simulated` or `manual`; the swap point for MCP execution |
 | `src/settle.js` | wallet-signed settlement records |
 
-## Running it
-
-```bash
-npm install
-cp .env.example .env      # two Base Sepolia keys + a model API key
-npm run desk              # terminal 1
-npm run client            # terminal 2
-```
-
-Arguments are `PAIR NOTIONAL_USD STRIKE_PCT EXPIRY_SECONDS`. Whether the agent buys
-is a judgment, not a flag — strike distance in sigma is what moves it. The desk needs
-USDC to cover its cap plus a little ETH for payout gas; the client pays no gas,
-because the x402 premium is EIP-3009 and the facilitator submits it.
-
 ## Scope
 
 A working demo, not a desk to route real risk through. The premium leg settles on
