@@ -33,7 +33,7 @@ import { quotePut, payoutUsd } from "./pricing.js";
 import { openHedge, closeHedge } from "./hedge.js";
 import { signRecord } from "./settle.js";
 
-const PORT = Number(process.env.DESK_PORT || 4040);
+const PORT = Number(process.env.PORT || process.env.DESK_PORT || 4040);
 const NETWORK = process.env.X402_NETWORK || "base-sepolia";
 const FACILITATOR = process.env.X402_FACILITATOR_URL || "https://x402.org/facilitator";
 const RPC = process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org";
@@ -109,6 +109,9 @@ async function sendUsdc(to, amountUsd) {
 }
 
 const app = express();
+// Behind a platform proxy (Railway et al) so the x402 challenge advertises the
+// real https resource URL rather than http://<internal-host>.
+app.set("trust proxy", true);
 app.use(express.json({ limit: "32kb" }));
 
 app.get("/health", async (_req, res) => {
