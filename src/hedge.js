@@ -10,16 +10,42 @@
 
 import { markPrice } from "./binance.js";
 
+// Binance USDdS-M LOT_SIZE / MIN_NOTIONAL for the hedge symbol. An order has to be
+// a multiple of the step, at or above minQty, and clear the notional floor - so the
+// printed order is placeable as-is rather than needing rounding by hand.
+const QTY_STEP = Number(process.env.HEDGE_QTY_STEP || 0.01);
+const MIN_QTY = Number(process.env.HEDGE_MIN_QTY || 0.01);
+const MIN_NOTIONAL_USD = Number(process.env.HEDGE_MIN_NOTIONAL || 5);
+
+const stepDecimals = (String(QTY_STEP).split(".")[1] || "").length;
+
 export function openHedge({ pair, notionalUsd, entryPrice, mode }) {
-  const qty = notionalUsd / entryPrice;
+  // Round DOWN to the step so the hedge never exceeds the intended notional.
+  const stepped = Math.floor(notionalUsd / entryPrice / QTY_STEP) * QTY_STEP;
+  const orderQty = Number(stepped.toFixed(stepDecimals));
+  const orderNotional = orderQty * entryPrice;
+
+  const problems = [];
+  if (orderQty < MIN_QTY) problems.push(`below minQty ${MIN_QTY}`);
+  if (orderNotional < MIN_NOTIONAL_USD) problems.push(`below min notional $${MIN_NOTIONAL_USD}`);
+
   if (mode === "manual") {
     console.log("\n[hedge:manual] >>> place this now in your MCP client:");
-    console.log(`    USDdS-M Futures  SHORT  ${qty.toFixed(6)} ${pair}  (~$${notionalUsd})  @ market`);
-    console.log("    the desk will settle on the expiry timer regardless\n");
+    console.log(`    USDdS-M Futures   SELL  ${orderQty} ${pair}   MARKET`);
+    console.log(`    (~$${orderNotional.toFixed(2)} notional at ${entryPrice})`);
+    if (problems.length) {
+      console.log(`    !! Binance will REJECT this: ${problems.join(", ")}`);
+      console.log(`    !! raise NOTIONAL_USD to at least $${(MIN_QTY * entryPrice).toFixed(2)}`);
+    }
+    console.log("    the desk settles on the expiry timer either way\n");
   } else {
-    console.log(`[hedge:simulated] opened SHORT ${qty.toFixed(6)} ${pair} @ ${entryPrice}`);
+    console.log(
+      `[hedge:simulated] opened SHORT ${orderQty} ${pair} @ ${entryPrice} (~$${orderNotional.toFixed(2)})`
+    );
   }
-  return { pair, side: "short", qty, entryPrice, notionalUsd, mode, openedAt: Date.now() };
+
+  // Track the quantity actually placeable, so hedge PnL reflects the real order.
+  return { pair, side: "short", qty: orderQty, entryPrice, notionalUsd, mode, openedAt: Date.now() };
 }
 
 export async function closeHedge(pos) {
