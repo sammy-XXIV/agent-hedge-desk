@@ -372,6 +372,9 @@ app.get("/contract/:id", (req, res) => {
     terms: c.terms,
     expiresAt: c.expiresAt,
     voidReason: c.voidReason || null,
+    // The hedge the desk must place against this contract. Surfaced so the buyer
+    // (or anything driving the desk) can see it without reading desk logs.
+    hedge: c.hedge?.instruction || null,
     settlement: c.settlement || null,
   });
 });

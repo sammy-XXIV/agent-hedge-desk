@@ -29,15 +29,26 @@ export function openHedge({ pair, notionalUsd, entryPrice, mode }) {
   if (orderQty < MIN_QTY) problems.push(`below minQty ${MIN_QTY}`);
   if (orderNotional < MIN_NOTIONAL_USD) problems.push(`below min notional $${MIN_NOTIONAL_USD}`);
 
+  // Returned as part of the contract so whoever is driving the desk can see the
+  // order without needing access to the desk's logs.
+  const instruction =
+    mode === "manual"
+      ? {
+          venue: "Binance USDdS-M Futures",
+          side: "SELL",
+          symbol: pair,
+          quantity: orderQty,
+          type: "MARKET",
+          approxNotionalUsd: Number(orderNotional.toFixed(2)),
+          text: `SELL ${orderQty} ${pair} MARKET on Binance USDdS-M Futures (~$${orderNotional.toFixed(2)})`,
+          rejectsBecause: problems.length ? problems : null,
+        }
+      : null;
+
   if (mode === "manual") {
-    console.log("\n[hedge:manual] >>> place this now in your MCP client:");
-    console.log(`    USDdS-M Futures   SELL  ${orderQty} ${pair}   MARKET`);
-    console.log(`    (~$${orderNotional.toFixed(2)} notional at ${entryPrice})`);
-    if (problems.length) {
-      console.log(`    !! Binance will REJECT this: ${problems.join(", ")}`);
-      console.log(`    !! raise NOTIONAL_USD to at least $${(MIN_QTY * entryPrice).toFixed(2)}`);
-    }
-    console.log("    the desk settles on the expiry timer either way\n");
+    console.log(`\n[hedge:manual] desk must hedge: ${instruction.text}`);
+    if (problems.length) console.log(`    !! Binance will REJECT this: ${problems.join(", ")}`);
+    console.log("");
   } else {
     console.log(
       `[hedge:simulated] opened SHORT ${orderQty} ${pair} @ ${entryPrice} (~$${orderNotional.toFixed(2)})`
@@ -45,7 +56,16 @@ export function openHedge({ pair, notionalUsd, entryPrice, mode }) {
   }
 
   // Track the quantity actually placeable, so hedge PnL reflects the real order.
-  return { pair, side: "short", qty: orderQty, entryPrice, notionalUsd, mode, openedAt: Date.now() };
+  return {
+    pair,
+    side: "short",
+    qty: orderQty,
+    entryPrice,
+    notionalUsd,
+    mode,
+    instruction,
+    openedAt: Date.now(),
+  };
 }
 
 export async function closeHedge(pos) {

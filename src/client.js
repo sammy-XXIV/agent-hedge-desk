@@ -206,6 +206,16 @@ async function main() {
       lastStatus = s.status;
       const until = s.expiresAt ? ` until ${new Date(s.expiresAt).toISOString()}` : "";
       console.log(`[client]    status -> ${s.status}${until}`);
+      if (s.status === "active" && s.hedge) {
+        console.log("");
+        console.log("  ┌─ the desk now carries this risk and must hedge it ─────────────");
+        console.log(`  │  ${s.hedge.text}`);
+        if (s.hedge.rejectsBecause) {
+          console.log(`  │  !! would be rejected: ${s.hedge.rejectsBecause.join(", ")}`);
+        }
+        console.log("  └────────────────────────────────────────────────────────────────");
+        console.log("");
+      }
     }
     if (s.status === "void") {
       console.log(`[client] contract VOID: ${s.voidReason}. Premium was not settled, no charge.`);
