@@ -57,6 +57,7 @@ async function usdc(addr) {
 async function main() {
   hr();
   console.log(`[client] agent ${account.address}`);
+  console.log(`[client] desk  ${DESK_URL}`);
   console.log(`[client] wants cover: $${terms.notionalUsd} of ${terms.pair}, strike ${terms.strikePct}% OTM, ${terms.expirySeconds}s`);
   const balBefore = await usdc(account.address);
   console.log(`[client] USDC before: ${balBefore ?? "?"}`);
