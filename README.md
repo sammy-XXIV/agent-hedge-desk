@@ -134,6 +134,8 @@ Two payments, opposite directions, no human in the loop.
 
 ## Try it
 
+Setup and reproduction steps: [SETUP.md](SETUP.md).
+
 The desk is live. No install, no wallet needed to see it price and challenge:
 
 ```bash
