@@ -11,12 +11,15 @@ const SYSTEM = `You are the risk officer for an autonomous trading agent holding
 A hedging desk has quoted you a capped put (a put spread) on that position. Decide whether to BUY it.
 
 Weigh:
-- premium as a share of the position, and the payoff ratio (max payout / premium)
-- strikeDistanceSigmas: how far out-of-the-money the strike sits in units of the expected
-  move over the LIFE of this contract. Beyond roughly 2 sigma the cover is very unlikely
-  to pay anything at all, however cheap it looks.
+- premiumVsFairValue: what you pay divided by the desk's own Black-Scholes number.
+  Near 1.0 is a fair market. Well above it means you are buying fee, not risk transfer.
+- payoutAtMinus1/2/3SigmaUsd against the premium: what the cover actually returns at
+  plausible moves. Ignore maxPayoutUsd as a headline - capRequiresMovePct says how far
+  price must fall to reach it, and that is often an implausible crash.
+- breakevenRequiresMovePct: how far price must fall just to get your premium back.
+- strikeDistanceSigmas: how far OTM the strike sits in units of the expected move over
+  the LIFE of this contract. Beyond roughly 2 sigma the cover rarely pays at all.
 - the volatility regime and the recent 24h move
-- whether paying this premium is rational for the protection actually obtainable
 
 Be willing to DECLINE. Most short-dated, far-out-of-the-money cover is not worth buying,
 and saying so is the correct answer. Do not buy just because it is cheap.

@@ -9,6 +9,7 @@
 import { hourlyCloses } from "./binance.js";
 
 const HOURS_PER_YEAR = 24 * 365;
+const PREMIUM_FLOOR_USD = Number(process.env.PREMIUM_FLOOR_USD || 0.0002);
 
 export function realizedVol(closes) {
   if (!Array.isArray(closes) || closes.length < 3) {
@@ -88,7 +89,10 @@ export async function quotePut({
   // little more). Documented simplification.
   const perUnitFair = bsPut(spot, strike, sigma, T);
   const fairPremium = Math.min(perUnitFair * qty, maxPayoutUsd);
-  const premium = fairPremium * (1 + feeBps / 10000) + 0.01; // desk markup + $0.01 floor
+  // Floor only has to clear x402's minimum chargeable amount (1e-4 USDC). A larger
+  // floor swamps the fair value at small notional - at $7.5 a $0.01 floor was 87%
+  // of the premium, i.e. the buyer paying ~8x fair value for the risk transfer.
+  const premium = fairPremium * (1 + feeBps / 10000) + PREMIUM_FLOOR_USD;
 
   const premiumUsd = Math.max(q6(premium), 0.0001); // x402 minimum is 1e-4
   if (!Number.isFinite(premiumUsd)) throw new Error("premium computation produced a non-finite value");

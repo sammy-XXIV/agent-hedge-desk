@@ -93,11 +93,23 @@ async function main() {
   const T = quote.expirySeconds / (365 * 24 * 3600);
   const expectedMoveUsd = quote.spot * quote.sigmaAnnualized * Math.sqrt(T);
   const strikeDistanceSigmas = expectedMoveUsd > 0 ? (quote.spot - quote.strike) / expectedMoveUsd : Infinity;
-  const payoffRatio = quote.maxPayoutUsd / quote.premiumUsd;
+  // The cap-based payoff ratio is a mirage at small notional - reaching the cap can
+  // need a double-digit crash. Give the model what actually happens at plausible
+  // moves, plus how far price must fall to break even or to reach the cap at all.
+  const payoutAt = (sigmas) => {
+    const mark = quote.spot - sigmas * expectedMoveUsd;
+    return Number(Math.min(Math.max(quote.strike - mark, 0) * quote.qty, quote.maxPayoutUsd).toFixed(6));
+  };
+  const breakevenMark = quote.strike - quote.premiumUsd / quote.qty;
+  const breakevenMovePct = ((quote.spot - breakevenMark) / quote.spot) * 100;
+  const capMark = quote.strike - quote.maxPayoutUsd / quote.qty;
+  const capRequiresMovePct = ((quote.spot - capMark) / quote.spot) * 100;
   const day = await dayStats(quote.pair);
 
   console.log("[client] 2) deliberating...");
-  console.log(`     premium ${premiumPct.toFixed(3)}% of notional | max payout $${quote.maxPayoutUsd} = ${payoffRatio.toFixed(0)}x premium`);
+  console.log(`     premium ${premiumPct.toFixed(3)}% of notional = ${(quote.premiumUsd / quote.fairPremiumUsd).toFixed(2)}x fair value`);
+  console.log(`     payout at -1s $${payoutAt(1)} | -2s $${payoutAt(2)} | -3s $${payoutAt(3)}  (premium $${quote.premiumUsd})`);
+  console.log(`     breakeven needs -${breakevenMovePct.toFixed(3)}% | the $${quote.maxPayoutUsd} cap needs -${capRequiresMovePct.toFixed(1)}%`);
   console.log(`     expected move over ${quote.expirySeconds}s: $${expectedMoveUsd.toFixed(2)} | strike sits ${strikeDistanceSigmas.toFixed(2)} sigma out`);
   console.log(`     vol ${(quote.sigmaAnnualized * 100).toFixed(1)}% annualized | 24h ${day.priceChangePct24h > 0 ? "+" : ""}${day.priceChangePct24h}%`);
 
@@ -113,9 +125,14 @@ async function main() {
     },
     derived: {
       premiumPctOfNotional: Number(premiumPct.toFixed(4)),
-      payoffRatio: Number(payoffRatio.toFixed(2)),
+      premiumVsFairValue: Number((quote.premiumUsd / quote.fairPremiumUsd).toFixed(3)),
       expectedMoveUsd: Number(expectedMoveUsd.toFixed(4)),
       strikeDistanceSigmas: Number(strikeDistanceSigmas.toFixed(3)),
+      payoutAtMinus1SigmaUsd: payoutAt(1),
+      payoutAtMinus2SigmaUsd: payoutAt(2),
+      payoutAtMinus3SigmaUsd: payoutAt(3),
+      breakevenRequiresMovePct: Number(breakevenMovePct.toFixed(3)),
+      capRequiresMovePct: Number(capRequiresMovePct.toFixed(2)),
     },
     market: {
       annualizedVolPct: Number((quote.sigmaAnnualized * 100).toFixed(2)),
