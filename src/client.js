@@ -100,6 +100,14 @@ async function main() {
     const mark = quote.spot - sigmas * expectedMoveUsd;
     return Number(Math.min(Math.max(quote.strike - mark, 0) * quote.qty, quote.maxPayoutUsd).toFixed(6));
   };
+  // What the position itself loses at those moves, and how much of it the cover
+  // actually removes. Without this the model treats the put as a standalone bet -
+  // and insurance always loses an expected-value test, so it would decline forever.
+  const positionLossAt = (sigmas) => Number((sigmas * expectedMoveUsd * quote.qty).toFixed(6));
+  const coverageAt = (sigmas) => {
+    const loss = positionLossAt(sigmas);
+    return loss > 0 ? Number(((payoutAt(sigmas) / loss) * 100).toFixed(1)) : 0;
+  };
   const breakevenMark = quote.strike - quote.premiumUsd / quote.qty;
   const breakevenMovePct = ((quote.spot - breakevenMark) / quote.spot) * 100;
   const capMark = quote.strike - quote.maxPayoutUsd / quote.qty;
@@ -109,6 +117,7 @@ async function main() {
   console.log("[client] 2) deliberating...");
   console.log(`     premium ${premiumPct.toFixed(3)}% of notional = ${(quote.premiumUsd / quote.fairPremiumUsd).toFixed(2)}x fair value`);
   console.log(`     payout at -1s $${payoutAt(1)} | -2s $${payoutAt(2)} | -3s $${payoutAt(3)}  (premium $${quote.premiumUsd})`);
+  console.log(`     position loses $${positionLossAt(1)} at -1s -> cover returns ${coverageAt(1)}% of it | at -2s ${coverageAt(2)}%`);
   console.log(`     breakeven needs -${breakevenMovePct.toFixed(3)}% | the $${quote.maxPayoutUsd} cap needs -${capRequiresMovePct.toFixed(1)}%`);
   console.log(`     expected move over ${quote.expirySeconds}s: $${expectedMoveUsd.toFixed(2)} | strike sits ${strikeDistanceSigmas.toFixed(2)} sigma out`);
   console.log(`     vol ${(quote.sigmaAnnualized * 100).toFixed(1)}% annualized | 24h ${day.priceChangePct24h > 0 ? "+" : ""}${day.priceChangePct24h}%`);
@@ -133,6 +142,12 @@ async function main() {
       payoutAtMinus3SigmaUsd: payoutAt(3),
       breakevenRequiresMovePct: Number(breakevenMovePct.toFixed(3)),
       capRequiresMovePct: Number(capRequiresMovePct.toFixed(2)),
+      positionLossAtMinus1SigmaUsd: positionLossAt(1),
+      positionLossAtMinus2SigmaUsd: positionLossAt(2),
+      positionLossAtMinus3SigmaUsd: positionLossAt(3),
+      downsideCoveredAtMinus1SigmaPct: coverageAt(1),
+      downsideCoveredAtMinus2SigmaPct: coverageAt(2),
+      downsideCoveredAtMinus3SigmaPct: coverageAt(3),
     },
     market: {
       annualizedVolPct: Number((quote.sigmaAnnualized * 100).toFixed(2)),
