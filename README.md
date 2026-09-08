@@ -1,222 +1,208 @@
 # Agent Hedging Desk
 
-**One agent sells another agent downside protection on a Binance asset. The premium
-is paid agent-to-agent over x402. The desk hedges the risk through Binance Agent OS,
-and pays the holder on-chain if the option finishes in the money.**
+> An autonomous agent can open a position. It cannot buy insurance on one —
+> there is no options desk that answers to software. This is that desk.
 
-Built for the Binance Agent OS Mini Hackathon — **Track A**, theme **Payment Workflows
-(agent-to-agent payments)**.
+One agent quotes downside cover on a Binance asset. Another agent decides whether
+the cover is worth buying, and pays for it **agent-to-agent over x402**. The desk
+hedges the risk and settles the payout on-chain when the option finishes in the
+money. No human approves anything in the middle.
 
----
+> **Status: working end-to-end on testnet.** Premium settlement, contract lifecycle
+> and signed records are real. The hedge leg runs in `simulated` mode by default —
+> `manual` prints the exact futures order for an MCP-connected client to place.
+> Payment settles on Base Sepolia, not BNB Chain; see [Limitations](#limitations).
 
-## Why this exists
+Built for the Binance Agent OS Mini Hackathon — Track A, **Payment Workflows**.
 
-Autonomous trading agents can take positions, but they have no way to *hedge* one
-without a human wiring up an options account somewhere. Deltr-style agents run a
-strategy for themselves; there is no counterparty, no market.
+## Why an agent can't just hedge itself
 
-The Hedging Desk is the missing primitive: an agent that **writes protection for
-other agents** and settles it end-to-end, with the payment leg as the product, not
-a side effect.
+A trading agent holding spot has three choices today and all of them need a human:
+open a futures account and manage margin, buy options on a venue with no agent API,
+or eat the drawdown. Delta-neutral bots sidestep this by running one strategy for
+their own book — there is no counterparty, no market, nothing to buy.
+
+Risk transfer needs two parties. That is why this is a **payment** problem and not a
+trading one: for one agent to carry another's downside, money has to move between
+them, per contract, without anyone clicking approve. x402 is what makes that
+possible, and it is the product here — not billing bolted onto a trading demo.
+
+## Why the payout is capped
+
+The desk sells a put **spread**, not a naked put:
 
 ```
-Client agent A                         Desk agent B
-  |  POST /quote (pair, size, strike, expiry)   |
-  |-------------------------------------------->|  prices a put from live
-  |            quote + premium                  |  Binance realized vol (BS, r=0)
-  |<-------------------------------------------|
-  |  policy check: premium <= X% of notional    |
-  |  POST /buy/:id   --- HTTP 402 --------------|
-  |  sign USDC payment, retry with X-PAYMENT -->|  x402 premium received  (A -> B)
-  |                                            |  opens short perp hedge (Agent OS)
-  |            contract ACTIVE                  |
-  |<-------------------------------------------|
-  |            ... expiry timer ...             |
-  |                                            |  reads Binance mark price
-  |                                            |  closes hedge, computes payout
-  |         USDC payout (if ITM)  <-------------|  on-chain transfer  (B -> A)
-  |         signed settlement record            |
-  |<-------------------------------------------|
+payout = min( max(strike − mark, 0) × qty , MAX_PAYOUT_USD )
 ```
 
-Two payments, opposite directions, no human in the loop.
+A naked put has unbounded liability — the underlying can go to zero and the writer
+owes `strike × qty`. That number is unknowable when the contract is written, so a
+desk carrying it cannot answer the only question that matters: *can I pay what I
+just sold?*
 
-## Where the model actually decides
+Capping the payout turns liability into a constant, and that constant is what makes
+solvency checkable at all:
 
-Execution is deterministic on purpose — pricing, payout, settlement and the policy
-caps are all arithmetic, auditable and replayable. The model sits at the **judgment**
-layer, on the buy side:
+```
+free collateral = on-chain USDC balance − liability reserved by live contracts
+```
 
-- The client computes the numbers that matter: premium as a share of the position,
-  payoff ratio, the expected move over the contract's life, and how many sigma out
-  the strike sits.
-- Those go to the configured model, which decides **buy or decline** and says why.
-- **Hard policy guardrails run first and cannot be lifted by the model**: if the
-  premium exceeds the wallet balance or the `MAX_PREMIUM_PCT` cap, the request is
-  blocked before the model is even asked. A hallucinating model can decline a good
-  trade; it cannot overspend and it cannot raise a limit.
-- The model never sees or sets amounts, addresses or execution parameters.
+`/quote` returns **409** when free collateral is below the cap, and the check runs
+again at purchase. The desk refuses to write cover it cannot fund. Reserved
+collateral is released on settlement or void.
 
-A model API key is therefore **required** to run the client. This is the
-difference between an agent and a threshold: offered a cent-priced put with a 200x
-payoff ratio but a strike 36 sigma away, it declines — for a stated reason.
+## Why the contract waits before going live
 
-## How it maps to Agent OS
+x402's middleware verifies the payment **signature** before handing off to the route
+handler, but performs **on-chain settlement only after that handler returns**. Write
+the contract inside the handler and you have written cover for a premium that may
+never land — free options for anyone who can make settlement fail.
 
-| Agent OS tool | Use here |
-| --- | --- |
-| **x402** (agent-driven payments) | premium `A -> B`; the `/buy` route is x402-gated at the exact per-quote premium |
-| **MCP server** (market data) | live spot, hourly klines for realized vol, and the settlement reference price |
-| **MCP server** (trade) / **Agentic Wallet** | the short-perp hedge leg — see `HEDGE_MODE` below |
-
-The premium payment is genuine x402 today. The hedge leg ships in `simulated` mode
-so the full loop runs unattended; `manual` mode prints the exact futures order to
-place in an MCP-connected client on camera. A fully automated hedge issues that
-order through the Binance MCP `Trade` scope — that swap lives entirely in
-`src/hedge.js`.
-
-## Pricing (deliberately simple, documented)
-
-- Black-Scholes European put, risk-free rate = 0.
-- Volatility = annualized realized vol from the last 168 hourly closes (Binance).
-- Premium = fair value x `(1 + DESK_FEE_BPS/10000)` + `$0.01` floor.
-- Payout at expiry = `min( max(strike - mark, 0) x qty , MAX_PAYOUT_USD )`,
-  with `qty = notional / entry spot`.
-
-**The payout is capped**, so this is a put *spread*, not a naked put. That is
-deliberate: it bounds the desk's liability to a known number, which is what makes
-the collateral check below possible at all.
-
-This is a demo pricer. It ignores gamma, vol-of-vol, jumps and adverse selection —
-a production desk needs a real risk engine and capital. See *Limitations*.
-
-## Solvency and contract lifecycle
-
-The desk will not write cover it cannot pay:
-
-- Free collateral = on-chain USDC balance − liability already reserved by live
-  contracts. `/quote` returns **409** if free collateral is below `MAX_PAYOUT_USD`,
-  and the check runs again at purchase.
-- Reserved collateral is released on settlement or void.
+So contracts stage first and activate only once a settlement receipt exists:
 
 ```
 pending_settlement ──► active ──► settled | settled_unpaid
-        └──────────► void   (x402 on-chain settlement never landed)
+        └──────────► void   (settlement never landed)
 ```
 
-A contract is staged as `pending_settlement` while the premium is still settling
-on-chain. x402 verifies the signature *before* handing off to the handler but only
-settles *after* it returns — so the desk waits for the settlement receipt before it
-opens a hedge or arms a payout timer. If settlement never lands, the contract goes
-`void` and nothing was written. `settled_unpaid` means the put finished in the money
-but the payout transfer failed; the signed record carries `payoutStatus` and
-`payoutError` rather than silently claiming it paid.
+Nothing is hedged and no payout timer is armed until the premium is actually on
+chain. `settled_unpaid` means the put finished in the money but the transfer failed —
+the signed record carries `payoutStatus` and `payoutError` rather than quietly
+claiming it paid.
 
-## Prerequisites
+## Why the model only judges, never executes
 
-- Node 20+
-- Two wallets on **Base Sepolia** (USDC faucet: <https://faucet.circle.com>):
-  - **client** — a few cents of USDC to pay premiums. **No ETH needed**: the x402
-    premium uses EIP-3009, so the facilitator submits it and the payer spends no gas.
-  - **desk** — at least `MAX_PAYOUT_USD` (default $2) in USDC, **plus some Base
-    Sepolia ETH for gas**. The payout is an ordinary ERC-20 transfer sent by the
-    desk, so it does pay gas. Below the USDC threshold the desk refuses to quote —
-    that is the solvency gate, not a bug.
-- **A model API key — required.** The client agent's buy/decline is a model
-  judgment; it will not start without one. Any OpenAI-compatible endpoint works
-  (`LLM_PROVIDER=openai` + `LLM_BASE_URL`), or set `LLM_PROVIDER=anthropic`.
-  See *Where the model actually decides*.
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env      # fill DESK_PRIVATE_KEY, CLIENT_PRIVATE_KEY, LLM_API_KEY
-```
-
-> Verify the x402 package versions resolve — the API moves fast:
-> `npm view x402-express version && npm view x402-fetch version`.
-> If `wrapFetchWithPayment` rejects a bare account, pass a viem `WalletClient` instead
-> (one-line change in `src/client.js`).
-
-## Run
-
-Terminal 1 — the desk:
-
-```bash
-npm run desk
-```
-
-Terminal 2 — the client (args optional; defaults come from `.env`):
-
-```bash
-npm run client                          # uses .env defaults
-npm run client BNBUSDT 100 0.05 90      # ~0.7 sigma out -> agent buys, full loop runs
-npm run client BNBUSDT 100 2.5  90      # ~36 sigma out -> agent declines, no payment
-```
-
-Arguments are `PAIR NOTIONAL_USD STRIKE_PCT EXPIRY_SECONDS`.
-
-Whether the agent buys is a judgment call, not a switch — the strike distance in
-sigma is what moves it. At BNB's ~41% vol over a 90s expiry, `0.05` sits around
-0.7 sigma out (worth buying) while `2.5` is ~36 sigma out and gets declined even
-though it costs a cent and offers a 200x payoff ratio. There is no dry-run flag:
-if it decides to buy, it pays for real.
-
-## What a run looks like
-
-Two outcomes are worth trying, because the client agent genuinely decides between
-them rather than following a switch.
-
-**It buys** — strike ~0.7 sigma out, so the cover is plausible:
+Pricing, payout, collateral and the policy caps are arithmetic — auditable, and
+identical on every replay. The model sits at exactly one point: deciding whether the
+cover is worth buying.
 
 ```
-[client] 2) deliberating...
-     premium 0.020% of notional | max payout $2 = 101x premium
-     expected move over 300s: $0.94 | strike sits 0.72 sigma out
-[client]    BUY
-     "Premium 0.02% of notional, strike 0.72 sigma from spot, max payout $2 covers
-      plausible move. Payoff ratio 101x, vol high, recent -1.88% move."
-[client]    premium paid - x402 receipt: { success: true, transaction: '0x4384d71a...' }
-[client]    contract 659aa490 pending_settlement
-[client]    status -> active
-[client]    status -> settled
-[client] 5) SETTLED
-     mark @ expiry : 739.36  (spot-fallback)   strike 738.231
-     payout        : $0 [none]
-     USDC after    : 19.980246   (before 20)
+premium · payoff ratio · expected move · strike distance in sigma
+        │
+   policy guardrails ── balance / MAX_PREMIUM_PCT ──► blocked, model never asked
+        │
+      model ──► buy | decline   + stated reason
+        │
+   deterministic execution
 ```
 
-**It declines** — same $0.01 premium and a 200x payoff ratio, but the strike is far
-enough out that the option cannot realistically pay:
+A hallucinating model can decline a good trade. It cannot overspend, cannot raise a
+limit, and never sees an address or an amount it could change.
+
+The discrimination is real. Offered a **$0.01** premium at a **200× payoff ratio**:
 
 ```
 [client]    DECLINE
      "Strike 35.96 sigma out with only $0.51 expected move over 90s. Probability of
       payout is effectively zero; payoff ratio 200x is meaningless against negative EV."
-[client] declined the cover. no payment made.
 ```
 
-That second case is the point: it is offered something cheap with a huge headline
-payoff and turns it down for the right reason.
+Move the strike to ~0.7 sigma and it buys, pays, and the loop runs:
 
-## Limitations (stated plainly)
+```
+[client]    BUY
+     "Premium 0.02% of notional, strike 0.72 sigma from spot. Payoff ratio 101x,
+      vol high, recent -1.88% move."
+[client]    premium paid - x402 receipt: { success: true, transaction: '0x4384d71a…' }
+[client]    status -> active -> settled
+     mark @ expiry : 739.36 (spot-fallback)   strike 738.231
+     payout        : $0 [none]
+     USDC after    : 19.980246   (before 20)
+```
 
-- **Hedge leg is `simulated` by default.** Real automated futures execution via the
-  Binance MCP is the documented next step, not done here. Settlement records carry
-  `hedgeIsSimulated`, and `deskCashNetUsd` counts only real cash flows — simulated
-  hedge PnL is reported separately, never folded into the headline number.
-- **Pricing is a toy.** Trailing realized vol is gameable; no gamma/jump risk model.
-- **Testnet.** x402 premium + payout settle in Base Sepolia USDC.
-- **All state is in memory.** A desk restart drops live contracts and their payout
-  timers — obligations are lost silently. Needs persistence before it is real.
-- **Payout leg is a direct USDC transfer, not x402.** Only the premium uses the
-  x402 handshake.
-- **The payout address is not bound to the payer.** Whoever holds a `quoteId`
-  within its 60s window can pay it, and the payout goes to the quote requester.
-- **Single writer.** A real desk pools risk and margin across many writers.
-- **Settlement reference**: the desk prefers the USDⓈ-M perpetual mark price, but
-  `fapi.binance.com` is blocked on many networks, in which case it falls back to
-  the spot price. The signed record always states which was used (`markSource`:
-  `futures-mark` or `spot-fallback`), so a settlement is never silently rebased.
-- The client's underlying spot bag is assumed, not verified on-chain.
+## Flow
+
+```
+Client agent A                                     Desk agent B
+  │  POST /quote  (pair, size, strike, expiry)          │
+  │────────────────────────────────────────────────────►│  prices a put from live
+  │             quote + premium                         │  Binance realized vol
+  │◄────────────────────────────────────────────────────│
+  │  guardrails, then model: buy or decline             │
+  │  POST /buy/:id  ───────── HTTP 402 ─────────────────│
+  │  sign USDC payment, retry with X-PAYMENT  ─────────►│  premium settles   (A → B)
+  │                                                     │  stage → activate → hedge
+  │◄──────────── contract active ───────────────────────│
+  │                     … expiry …                      │
+  │                                                     │  reads settlement price,
+  │                                                     │  closes hedge, computes payout
+  │◄──────────── USDC payout, if ITM ───────────────────│  on-chain transfer  (B → A)
+  │◄──────────── signed settlement record ──────────────│
+```
+
+Two payments, opposite directions, no human in the loop.
+
+## API
+
+| Route | Paid | Does |
+|---|---|---|
+| `POST /quote` | free | prices a capped put from 168h realized vol; returns a 60s single-use `quoteId` |
+| `POST /buy/:quoteId` | **x402** | premium priced per quote; stages the contract, activates on settlement |
+| `GET /contract/:id` | free | lifecycle status, then the wallet-signed settlement record |
+| `GET /health` | free | desk address, hedge mode, collateral: balance / reserved / free |
+
+`POST /quote` with `{ pair, strikePct, expirySeconds, notionalUsd, payoutAddress }`:
+
+```json
+{
+  "quoteId": "26db4f1a-…",
+  "quote": {
+    "pair": "BNBUSDT", "spot": 739.93, "strike": 738.82,
+    "sigmaAnnualized": 0.4116, "expirySeconds": 90,
+    "qty": 0.135148, "maxPayoutUsd": 2,
+    "fairPremiumUsd": 0.000381, "premiumUsd": 0.010387,
+    "model": "black-scholes put, r=0, realized vol (168h hourly), payout capped"
+  }
+}
+```
+
+An unpaid `POST /buy/:quoteId` returns a standard x402 challenge carrying the exact
+atomic premium, the desk's `payTo`, and the USDC asset for the network.
+
+## Layout
+
+| File | Role |
+|---|---|
+| `src/desk.js` | the desk agent — quote, x402-gated buy, staging, settlement, payout |
+| `src/client.js` | the client agent — guardrails, judgment, payment, balance proof |
+| `src/judgment.js` | the buy/decline call and its stated reason |
+| `src/model.js` | provider-agnostic model client — OpenAI-compatible or Anthropic |
+| `src/pricing.js` | Black-Scholes put on realized vol, capped payout |
+| `src/binance.js` | public market data, multi-host with mirror fallback |
+| `src/hedge.js` | the hedge leg — `simulated` or `manual`; the swap point for MCP execution |
+| `src/settle.js` | wallet-signed settlement records |
+
+## Running it
+
+```bash
+npm install
+cp .env.example .env      # two Base Sepolia keys + a model API key
+npm run desk              # terminal 1
+npm run client            # terminal 2
+```
+
+Arguments are `PAIR NOTIONAL_USD STRIKE_PCT EXPIRY_SECONDS`. Whether the agent buys
+is a judgment, not a flag — strike distance in sigma is what moves it. The desk needs
+USDC to cover its cap plus a little ETH for payout gas; the client pays no gas,
+because the x402 premium is EIP-3009 and the facilitator submits it.
+
+## Limitations
+
+- **Payment settles on Base Sepolia, not BNB Chain.** Binance's own x402 (B402) is
+  partner-gated, and the open x402 stack has no BNB Chain network. Said plainly
+  rather than implied away.
+- **The hedge is simulated by default.** `manual` prints the exact USDⓈ-M order for
+  an MCP-connected client to place. Records carry `hedgeIsSimulated`, and
+  `deskCashNetUsd` counts only real cash — simulated PnL is never folded in.
+- **The pricer is a toy.** Trailing realized vol is gameable; no gamma, no jump risk.
+- **State is in memory.** A restart drops live contracts and their payout timers.
+- **Payout is a plain transfer, not x402.** Only the premium uses the handshake.
+- **The payout address is not bound to the payer** — whoever holds a `quoteId` inside
+  its 60s window can pay it.
+- **Settlement reference** prefers the USDⓈ-M mark price, but `fapi.binance.com` is
+  blocked on many networks and it falls back to spot. The signed record always states
+  which (`markSource`), so a settlement is never silently rebased.
+
+---
+
+Made by **SAMMY**
